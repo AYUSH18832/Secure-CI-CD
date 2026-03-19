@@ -2,52 +2,62 @@ name: Secure CI/CD Pipeline
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
 
 jobs:
   security-pipeline:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Pull the code from GitHub
+      # 1. Checkout the code from the repository
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      # 2. Scan for leaked secrets (Passwords, API Keys)
+      # 2. Secret Scan (Gitleaks) - Stops if API keys or passwords are found
       - name: Run Gitleaks Scan
         uses: zricethezav/gitleaks-action@v2
+        continue-on-error: false
 
-      # 3. Static Analysis (SAST) for code vulnerabilities
-      - name: Run Semgrep
+      # 3. Static Application Security Testing (Semgrep) - Scans for code flaws
+      - name: Run Semgrep (SAST)
         uses: returntocorp/semgrep-action@v1
+        with:
+          auditOnInvalidYaml: true
 
-      # 4. Scan project dependencies (Filesystem scan)
+      # 4. Dependency Scan (Trivy FS) - Checks package.json for known CVEs
       - name: Run Trivy FS Scan
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
           format: 'table'
+          exit-code: '1' # This fails the build if vulnerabilities are found
+          severity: 'CRITICAL,HIGH'
 
-      # 5. Build the Docker Image
+      # 5. Build Docker Image
       - name: Build Docker Image
         run: docker build -t secure-app .
 
-      # 6. Scan the Docker Image layers for vulnerabilities
+      # 6. Image Scan (Trivy Image) - Scans the actual container layers
       - name: Scan Docker Image
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: 'secure-app'
           format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
 
-      # 7. Login to Docker Hub (Requires Github Secrets)
+      # 7. Login to Docker Hub using Secrets
       - name: Login to Docker Hub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # 8. Tag and Push to Registry
+      # 8. Push Image to Registry
       - name: Push Image
         run: |
+          # Tagging with your username (from secrets)
           docker tag secure-app ${{ secrets.DOCKER_USERNAME }}/secure-app:latest
           docker push ${{ secrets.DOCKER_USERNAME }}/secure-app:latest
